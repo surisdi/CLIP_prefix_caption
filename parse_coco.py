@@ -9,22 +9,24 @@ from tqdm import tqdm
 import argparse
 
 
+data_root = '/local/vondrick/didacsuris/local_data/COCO/'
+
 def main(clip_model_type: str):
     device = torch.device('cuda:0')
     clip_model_name = clip_model_type.replace('/', '_')
-    out_path = f"./data/coco/oscar_split_{clip_model_name}_train.pkl"
+    out_path = f"{data_root}/oscar_split_{clip_model_name}_train.pkl"
     clip_model, preprocess = clip.load(clip_model_type, device=device, jit=False)
-    with open('./data/coco/annotations/train_caption.json', 'r') as f:
-        data = json.load(f)
+    with open(f'{data_root}/annotations/captions_train2014.json', 'r') as f:
+        data = json.load(f)['annotations']
     print("%0d captions loaded from json " % len(data))
     all_embeddings = []
     all_captions = []
     for i in tqdm(range(len(data))):
         d = data[i]
         img_id = d["image_id"]
-        filename = f"./data/coco/train2014/COCO_train2014_{int(img_id):012d}.jpg"
+        filename = f"{data_root}/train2014/COCO_train2014_{int(img_id):012d}.jpg"
         if not os.path.isfile(filename):
-            filename = f"./data/coco/val2014/COCO_val2014_{int(img_id):012d}.jpg"
+            filename = f"{data_root}/val2014/COCO_val2014_{int(img_id):012d}.jpg"
         image = io.imread(filename)
         image = preprocess(Image.fromarray(image)).unsqueeze(0).to(device)
         with torch.no_grad():

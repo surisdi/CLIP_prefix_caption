@@ -20,8 +20,8 @@ class ConceptualDS(Dataset):
     @staticmethod
     def get_all_data(data_root: str, suffix: str):
         data = []
-        for i in range(16):
-            out_data_path = f"{data_root}/conceptual_{suffix}_{i:02d}.pkl"
+        for i in range(100):
+            out_data_path = f"{data_root}/downloaded_clipcap/conceptual_{suffix}_{i:02d}.pkl"
             if os.path.isfile(out_data_path):
                 with open(out_data_path, 'rb') as f:
                     raw_data = pickle.load(f)["info"]
@@ -63,7 +63,8 @@ class ConceptualDS(Dataset):
         self.data_root = data_root
         self.data = self.collect(data_root, suffix)
         self.preprocess = preprocess
-        self.dummy = torch.zeros(3, 288, 288)
+        # self.dummy = torch.zeros(3, 288, 288)
+        self.dummy = torch.zeros(3, 224, 224)
 
 
 def save_pickle(data, out_path: str, recover_index: Optional[int] = None):
@@ -90,7 +91,7 @@ def get_image(url: str, out_path: str, timeout=10):
 def thread(urls: List[Tuple[List[str], int]], thread_id: int, progress: tqdm, lock: Optional[threading.Lock],
            suffix: str, conceptual_root: str):
     out_root = f"{conceptual_root}/{suffix}"
-    out_data_path = f"{conceptual_root}/conceptual_{suffix}_{thread_id:02d}.pkl"
+    out_data_path = f"{conceptual_root}/downloaded_clipcap/conceptual_{suffix}_{thread_id:02d}.pkl"
     recover_index = 0
     if os.path.isfile(out_data_path):
         with open(out_data_path, 'rb') as f:
@@ -207,7 +208,7 @@ def main():
     parser.add_argument('--clip_model_type', default="ViT-B/32", choices=('RN50', 'RN101', 'RN50x4', 'ViT-B/32'))
     parser.add_argument('--num_threads', type=int, default=16)
     args = parser.parse_args()
-    download_conceptual(args.data_root, args.num_threads)
+    # download_conceptual(args.data_root, args.num_threads)
     create_clip_embeddings(args.data_root, args.clip_model_type)
 
 

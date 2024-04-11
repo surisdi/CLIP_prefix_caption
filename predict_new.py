@@ -17,8 +17,9 @@ from transformers import (
 )
 import skimage.io as io
 import PIL.Image
+from train import ClipCocoDataset, MappingType, ClipCaptionModel, ClipCaptionPrefix
 
-import cog
+# import cog
 
 # import torch
 
@@ -37,15 +38,15 @@ TSN = Optional[TS]
 TA = Union[T, ARRAY]
 
 WEIGHTS_PATHS = {
-    "coco": "coco_weights.pt",
-    "conceptual-captions": "/proj/vondrick/shared/video_captioning/conceptual_train/coco_prefix_latest.pt",
+    "coco": "/proj/vondrick/shared/video_captioning/coco_train/coco_prefix_latest.pt",
+    # "conceptual-captions": "/proj/vondrick/shared/video_captioning/conceptual_train/coco_prefix_latest.pt",
 }
 
 D = torch.device
 CPU = torch.device("cpu")
 
 
-class Predictor(cog.Predictor):
+class Predictor:
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
         self.device = torch.device("cuda")
@@ -55,28 +56,62 @@ class Predictor(cog.Predictor):
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
 
         self.models = {}
+
+        # self.prefix_length = 40
+        # prefix_length_clip = 40
+        # is_rn = False
+        # mapping_type = 'transformer'
+        # only_prefix = True
+        # num_layers = 8
+
         self.prefix_length = 10
+        prefix_length_clip = 10
+        is_rn = False
+        mapping_type = 'mlp'
+        only_prefix = True
+        num_layers = None
+
         for key, weights_path in WEIGHTS_PATHS.items():
-            model = ClipCaptionModel(self.prefix_length)
+
+
+
+
+
+
+            prefix_dim = 640 if is_rn else 512
+            mapping_type = {'mlp': MappingType.MLP, 'transformer': MappingType.Transformer}[mapping_type]
+            if only_prefix:
+                model = ClipCaptionPrefix(prefix_length, clip_length=prefix_length_clip, prefix_size=prefix_dim,
+                                          num_layers=num_layers, mapping_type=mapping_type)
+                print("Train only prefix")
+            else:
+                model = ClipCaptionModel(prefix_length, clip_length=prefix_length_clip, prefix_size=prefix_dim,
+                                         num_layers=num_layers, mapping_type=mapping_type)
+                # model = ClipCaptionModel(prefix_length=prefix_length, prefix_size=prefix_dim)
+                print("Train both prefix and GPT")
+                sys.stdout.flush()
+
+
+
             model.load_state_dict(torch.load(weights_path, map_location=CPU))
             model = model.eval()
             model = model.to(self.device)
             self.models[key] = model
 
-    @cog.input("image", type=cog.Path, help="Input image")
-    @cog.input(
-        "model",
-        type=str,
-        options=WEIGHTS_PATHS.keys(),
-        default="coco",
-        help="Model to use",
-    )
-    @cog.input(
-        "use_beam_search",
-        type=bool,
-        default=False,
-        help="Whether to apply beam search to generate the output text",
-    )
+    # @cog.input("image", type=cog.Path, help="Input image")
+    # @cog.input(
+    #     "model",
+    #     type=str,
+    #     options=WEIGHTS_PATHS.keys(),
+    #     default="coco",
+    #     help="Model to use",
+    # )
+    # @cog.input(
+    #     "use_beam_search",
+    #     type=bool,
+    #     default=False,
+    #     help="Whether to apply beam search to generate the output text",
+    # )
     def predict(self, image, model, use_beam_search):
         """Run a single prediction on the model"""
         image = io.imread(image)
@@ -108,57 +143,57 @@ class MLP(nn.Module):
         self.model = nn.Sequential(*layers)
 
 
-class ClipCaptionModel(nn.Module):
-
-    # @functools.lru_cache #FIXME
-    def get_dummy_token(self, batch_size: int, device: D) -> T:
-        return torch.zeros(
-            batch_size, self.prefix_length, dtype=torch.int64, device=device
-        )
-
-    def forward(
-        self, tokens: T, prefix: T, mask: Optional[T] = None, labels: Optional[T] = None
-    ):
-        embedding_text = self.gpt.transformer.wte(tokens)
-        prefix_projections = self.clip_project(prefix).view(
-            -1, self.prefix_length, self.gpt_embedding_size
-        )
-        # print(embedding_text.size()) #torch.Size([5, 67, 768])
-        # print(prefix_projections.size()) #torch.Size([5, 1, 768])
-        embedding_cat = torch.cat((prefix_projections, embedding_text), dim=1)
-        if labels is not None:
-            dummy_token = self.get_dummy_token(tokens.shape[0], tokens.device)
-            labels = torch.cat((dummy_token, tokens), dim=1)
-        out = self.gpt(inputs_embeds=embedding_cat, labels=labels, attention_mask=mask)
-        return out
-
-    def __init__(self, prefix_length: int, prefix_size: int = 512):
-        super(ClipCaptionModel, self).__init__()
-        self.prefix_length = prefix_length
-        self.gpt = GPT2LMHeadModel.from_pretrained("gpt2")
-        self.gpt_embedding_size = self.gpt.transformer.wte.weight.shape[1]
-        if prefix_length > 10:  # not enough memory
-            self.clip_project = nn.Linear(
-                prefix_size, self.gpt_embedding_size * prefix_length
-            )
-        else:
-            self.clip_project = MLP(
-                (
-                    prefix_size,
-                    (self.gpt_embedding_size * prefix_length) // 2,
-                    self.gpt_embedding_size * prefix_length,
-                )
-            )
-
-
-class ClipCaptionPrefix(ClipCaptionModel):
-    def parameters(self, recurse: bool = True):
-        return self.clip_project.parameters()
-
-    def train(self, mode: bool = True):
-        super(ClipCaptionPrefix, self).train(mode)
-        self.gpt.eval()
-        return self
+# class ClipCaptionModel(nn.Module):
+#
+#     # @functools.lru_cache #FIXME
+#     def get_dummy_token(self, batch_size: int, device: D) -> T:
+#         return torch.zeros(
+#             batch_size, self.prefix_length, dtype=torch.int64, device=device
+#         )
+#
+#     def forward(
+#         self, tokens: T, prefix: T, mask: Optional[T] = None, labels: Optional[T] = None
+#     ):
+#         embedding_text = self.gpt.transformer.wte(tokens)
+#         prefix_projections = self.clip_project(prefix).view(
+#             -1, self.prefix_length, self.gpt_embedding_size
+#         )
+#         # print(embedding_text.size()) #torch.Size([5, 67, 768])
+#         # print(prefix_projections.size()) #torch.Size([5, 1, 768])
+#         embedding_cat = torch.cat((prefix_projections, embedding_text), dim=1)
+#         if labels is not None:
+#             dummy_token = self.get_dummy_token(tokens.shape[0], tokens.device)
+#             labels = torch.cat((dummy_token, tokens), dim=1)
+#         out = self.gpt(inputs_embeds=embedding_cat, labels=labels, attention_mask=mask)
+#         return out
+#
+#     def __init__(self, prefix_length: int, prefix_size: int = 512):
+#         super(ClipCaptionModel, self).__init__()
+#         self.prefix_length = prefix_length
+#         self.gpt = GPT2LMHeadModel.from_pretrained("gpt2")
+#         self.gpt_embedding_size = self.gpt.transformer.wte.weight.shape[1]
+#         if prefix_length > 10:  # not enough memory
+#             self.clip_project = nn.Linear(
+#                 prefix_size, self.gpt_embedding_size * prefix_length
+#             )
+#         else:
+#             self.clip_project = MLP(
+#                 (
+#                     prefix_size,
+#                     (self.gpt_embedding_size * prefix_length) // 2,
+#                     self.gpt_embedding_size * prefix_length,
+#                 )
+#             )
+#
+#
+# class ClipCaptionPrefix(ClipCaptionModel):
+#     def parameters(self, recurse: bool = True):
+#         return self.clip_project.parameters()
+#
+#     def train(self, mode: bool = True):
+#         super(ClipCaptionPrefix, self).train(mode)
+#         self.gpt.eval()
+#         return self
 
 
 def generate_beam(
@@ -234,6 +269,9 @@ def generate_beam(
     ]
     order = scores.argsort(descending=True)
     output_texts = [output_texts[i] for i in order]
+
+    print(output_texts)
+
     return output_texts
 
 
@@ -300,3 +338,44 @@ def generate2(
             generated_list.append(output_text)
 
     return generated_list[0]
+
+
+
+if __name__ == '__main__':
+
+    # data = '/local/vondrick/didacsuris/local_data/ConceptualCaptions/conceptual_clip_ViT-B_32_train.pkl'
+    # prefix_length = 40
+    # prefix_length_clip = 40
+    # is_rn = False
+    # normalize_prefix = False
+    # mapping_type = 'transformer'
+    # only_prefix = True
+    # num_layers = 8
+
+    data = '/local/vondrick/didacsuris/local_data/ConceptualCaptions/conceptual_clip_ViT-B_32_train.pkl'
+    prefix_length = 10
+    normalize_prefix = False
+
+    # image_path = '/proj/vondrick/datasets/ConceptualCaptions/val/00000052.jpeg'
+    image_path = '/proj/vondrick/datasets/COCO/train2014/COCO_train2014_000000443864.jpg'
+
+    model = 'coco'  # 'conceptual-captions'
+
+    dataset = ClipCocoDataset(data, prefix_length, normalize_prefix=normalize_prefix)
+    # prefix_dim = 640 if is_rn else 512
+    # mapping_type = {'mlp': MappingType.MLP, 'transformer': MappingType.Transformer}[mapping_type]
+    # if only_prefix:
+    #     model = ClipCaptionPrefix(prefix_length, clip_length=prefix_length_clip, prefix_size=prefix_dim,
+    #                               num_layers=num_layers, mapping_type=mapping_type)
+    #     # model = ClipCaptionPrefix(prefix_length=prefix_length, prefix_size=prefix_dim)
+    #     print("Train only prefix")
+    # else:
+    #     model = ClipCaptionModel(prefix_length, clip_length=prefix_length_clip, prefix_size=prefix_dim,
+    #                               num_layers=num_layers, mapping_type=mapping_type)
+    #     # model = ClipCaptionModel(prefix_length=prefix_length, prefix_size=prefix_dim)
+    #     print("Train both prefix and GPT")
+    #     sys.stdout.flush()
+
+    pre = Predictor()
+    pre.setup()
+    pre.predict(image=image_path, model=model, use_beam_search=False)
